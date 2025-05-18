@@ -1,1 +1,0 @@
-[Compare Azure Content Delivery Network (CDN) product features | Microsoft Docs](https://docs.microsoft.com/en-us/azure/cdn/cdn-features)
