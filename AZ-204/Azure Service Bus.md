@@ -1,87 +1,140 @@
 
-https://docs.microsoft.com/en-us/azure/service-bus-messaging/topic-filters
+# Azure Service Bus — AZ-204 Exam Prep Summary
 
-https://docs.microsoft.com/en-us/azure/service-bus-messaging/service-bus-messaging-overview
+Azure Service Bus is a fully managed enterprise message broker service used to decouple applications and services, ensuring reliable message delivery.
 
-https://docs.microsoft.com/en-us/azure/service-bus-messaging/message-sequencing
+---
 
-https://docs.microsoft.com/en-us/azure/service-bus-messaging/service-bus-performance-improvements
+## 📌 Key Benefits:
+- Load balancing work across competing workers.
+- Safe routing of data and control across service/application boundaries.
+- High-reliability transactional work coordination.
 
-https://docs.microsoft.com/en-us/azure/service-bus-messaging/service-bus-performance-improvements?tabs=net-standard-sdk
+---
 
-## Azure Service Bus Fundamentals
+## 📚 Messaging Scenarios:
+- **Messaging**: Transfer business data like orders or logs.
+- **Decoupling Applications**: Producer and consumer operate asynchronously.
+- **Load Balancing**: Competing consumers read from queues safely.
+- **Topics & Subscriptions**: 1:n pub/sub pattern.
+- **Transactions**: Multiple operations within atomic scope.
+- **Message Sessions**: Enable strict message ordering and deferral.
 
-### Namespaces
+---
 
-A Service Bus namespace is a container for all messaging components (queues, topics, subscriptions). Each namespace provides a unique scoping container, in which your messaging resources reside. A namespace is essentially the root of your Service Bus address.
+## 📝 Core Concepts:
 
-Think of a namespace like a domain for your messaging infrastructure. It provides:
+### Queues:
+- Point-to-point communication.
+- Messages stored until consumed.
+- FIFO (First In, First Out) processing model.
 
-- A unique fully-qualified domain name (e.g., `mycompany.servicebus.windows.net`)
-- Access control points
-- A security boundary for your messaging resources
+### Topics & Subscriptions:
+- Pub/Sub model.
+- Topics: Accept messages from publishers.
+- Subscriptions: Virtual queues that receive topic messages.
+- Subscribers can filter and receive message subsets.
 
-### Topics and Subscriptions
+### Namespaces:
+- Scoping container for messaging resources (queues, topics, subscriptions).
+- Provides a unique FQDN (e.g., `mycompany.servicebus.windows.net`).
+- Security boundary and access control.
 
-Topics and subscriptions provide a publish/subscribe (pub/sub) messaging model. Unlike a queue where each message is processed by a single consumer, topics and subscriptions allow multiple subscribers to receive the same message.
+---
 
-Here's how they work together:
-
-1. **Topics**: A topic can receive messages from multiple independent publishers and make those messages available to multiple subscriptions. Messages are sent to a topic and delivered to one or more associated subscriptions.
-2. **Subscriptions**: A subscription represents a virtual queue that receives copies of messages sent to the topic. Subscribers can receive messages from a subscription, similar to how they would from a queue. Each subscription can have different filtering rules that restrict which messages it receives.
-
-## Key Exam Concepts for AZ-204
-
-### Namespace Details
-
-For the exam, understand that:
-
-- A namespace is a container for all your messaging components
-- You can have multiple queues and topics within a single namespace
-- Azure provides three different tiers for Service Bus: Basic, Standard, and Premium
-- Topics/subscriptions are only available in Standard and Premium tiers, not in Basic
-
-### Topic and Subscription Rules
-
-The AZ-204 exam often tests your understanding of subscription filters. These are rules that determine which messages from a topic get copied to a specific subscription. There are three types of filters:
-
-- Boolean filters: `TrueFilter` and `FalseFilter`
-- SQL filters: Allow complex conditions
-- Correlation filters: Match against message properties
-
-### Programming Model
-
-For the exam, you should understand how to:
-
-- Create namespaces, topics, and subscriptions programmatically
-- Send messages to topics
-- Receive messages from subscriptions
-- Handle message sessions and deadletter queues
-
-## Practical Example
-
-```csharp
-// Creating a client for a specific namespace
-var client = new ServiceBusClient("mycompany.servicebus.windows.net", new DefaultAzureCredential());
-
-// Creating a sender for a specific topic
-var sender = client.CreateSender("orders-topic");
-
-// Sending a message to the topic
-await sender.SendMessageAsync(new ServiceBusMessage
-{
-    Body = BinaryData.FromString(JsonSerializer.Serialize(order)),
-    Subject = "New Order",
-    ApplicationProperties =
-    {
-        { "Region", "Europe" },
-        { "Category", "Books" }
-    }
-});
-
-// Creating a receiver for a specific subscription
-var receiver = client.CreateReceiver("orders-topic", "europe-orders-subscription");
-
-// Receiving messages
-var message = await receiver.ReceiveMessageAsync();
+## 📊 Visual Overview:
+**Queues**
 ```
+[Producer] --> [Queue] --> [Consumer]
+```
+
+**Topics**
+```
+[Publisher] --> [Topic] --> [Subscription A]
+                               [Subscription B]
+```
+
+---
+
+## ✅ Exam Tips — Things to Remember:
+- Know when to use **queues** vs **topics/subscriptions**:
+  - **Queue** = one-to-one.
+  - **Topic** = one-to-many.
+- Understand **message sessions** for ordered processing.
+- Transactions can span multiple queues and operations.
+- Familiarize yourself with namespace-level configuration.
+- Be clear on **competing consumers** pattern.
+- Service Bus supports **dead-lettering** (unprocessed message handling).
+- Know the difference between **Standard** and **Premium tiers**.
+- Service Bus messages can have properties for filtering and routing.
+
+---
+
+
+# Azure Service Bus — Performance Best Practices
+
+## 📌 Messaging Performance Optimization
+
+|Area|Best Practice|
+|:--|:--|
+|**Connection Management**|Reuse `ServiceBusClient` and `ServiceBusSender/Receiver` instances instead of creating new ones.|
+|**Batching Messages**|Send and receive messages in batches to reduce network calls and improve throughput.|
+|**Prefetching**|Enable `PrefetchCount` to load multiple messages in a single call, reducing latency.|
+|**Concurrent Processing**|Use `MaxConcurrentCalls` or `ProcessMessageAsync` with parallelism for faster message processing.|
+|**Message Size Optimization**|Keep message size below **256 KB (Standard)** or **1 MB (Premium)**. Use **Azure Blob Storage** for larger payloads with message body containing just a reference URI.|
+|**Dead-lettering**|Use dead-letter queues (DLQ) for unprocessable messages to avoid blocking the queue.|
+|**Auto-complete Disable**|Disable `AutoCompleteMessages` and complete messages manually after processing for better control and reliability.|
+|**Transactions**|Use transactions only when necessary as they add overhead.|
+|**Connection Pooling**|Share Service Bus clients and connections to avoid connection throttling and excessive resource usage.|
+
+---
+
+## 📌 Reliability and Resilience Best Practices
+
+- **Retry Policies**: Implement exponential backoff and retries for transient faults.
+- **Duplicate Detection**: Use **duplicate detection** (via `MessageId`) to avoid processing the same message multiple times.
+- **Session-based Messaging**: For ordered or stateful workflows, use message sessions.
+- **Dead-letter Handling**: Monitor and process dead-letter queues proactively.
+- **Error Logging and Monitoring**: Integrate with Azure Monitor and set up alerts for message counts, DLQ counts, and connection metrics.
+
+---
+
+## 📌 Security Best Practices
+
+- Use **Managed Identity** or **Azure AD authentication** where possible.
+- Apply **RBAC (Role-Based Access Control)** for namespace access.
+- Restrict access via **Shared Access Policies** with minimal required permissions.
+
+---
+
+## 📌 Cost Optimization Tips
+
+- Use **Standard vs Premium tiers** appropriately:
+  - **Standard**: Suitable for most scenarios.
+  - **Premium**: When you need lower latency, predictable performance, and higher message sizes.
+- Batch messages and prefetch to reduce transaction and operation costs.
+
+---
+
+## 📌 AZ-204 Exam Tips:
+
+- Know what **PrefetchCount** and **MaxConcurrentCalls** do.
+- Understand **dead-lettering** behavior.
+- Recognize when to use **message sessions**.
+- Be able to choose between **Standard and Premium tiers** for different workload scenarios.
+- Expect questions on **retry policies** and handling transient faults.
+
+---
+
+## 📎 Docs References:
+- [Service Bus performance tips](https://learn.microsoft.com/en-us/azure/service-bus-messaging/service-bus-performance-improvements)
+- [Azure messaging best practices](https://learn.microsoft.com/en-us/azure/architecture/best-practices/messaging)
+
+
+## 📎 Official Documentation Links:
+- [Azure Service Bus Overview](https://learn.microsoft.com/en-us/azure/service-bus-messaging/service-bus-messaging-overview)
+- [Queue-based Load Leveling Pattern](https://learn.microsoft.com/en-us/azure/architecture/patterns/queue-based-load-leveling)
+- [Competing Consumers Pattern](https://learn.microsoft.com/en-us/azure/architecture/patterns/competing-consumers)
+- [Publisher/Subscriber Pattern](https://learn.microsoft.com/en-us/azure/architecture/patterns/publisher-subscriber)
+
+---
