@@ -1,5 +1,3 @@
-# 📚 AZ-204 Study Guide: Azure Storage Solutions
-
 ## 🎯 Introduction
 
 This guide covers the Azure Storage components needed for the AZ-204 (Developing Solutions for Microsoft Azure) certification exam. Azure Storage is a fundamental service that appears frequently in the exam.
@@ -640,13 +638,3 @@ For the AZ-204 exam, you should be familiar with the following NuGet package ver
 - **Misunderstanding of metadata limits** - 8KB total per storage resource
 - **Forgetting that metadata headers** are case-insensitive for retrieval but case-preserving for storage
 - **Not knowing how to effectively query based on properties or metadata**
-
----
-
-## 📚 Additional Resources
-
-- [Official Microsoft Learn Path for AZ-204](https://docs.microsoft.com/en-us/learn/certifications/exams/az-204)
-- [Azure Storage Documentation](https://docs.microsoft.com/en-us/azure/storage/)
-- [Azure Storage Client Library for .NET](https://docs.microsoft.com/en-us/dotnet/api/overview/azure/storage)
-- [Azure Storage Best Practices](https://docs.microsoft.com/en-us/azure/storage/blobs/storage-performance-checklist)
-- [Pricing Calculator](https://azure.microsoft.com/en-us/pricing/calculator/)
