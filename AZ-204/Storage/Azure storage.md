@@ -1,3 +1,5 @@
+# 📚 AZ-204 Study Guide: Azure Storage Solutions
+
 ## 🎯 Introduction
 
 This guide covers the Azure Storage components needed for the AZ-204 (Developing Solutions for Microsoft Azure) certification exam. Azure Storage is a fundamental service that appears frequently in the exam.
@@ -54,52 +56,290 @@ This guide covers the Azure Storage components needed for the AZ-204 (Developing
 - **Cool**: Infrequently accessed, stored for at least 30 days
 - **Archive**: Rarely accessed, stored for at least 180 days, highest retrieval costs
 
-### Lifecycle Management
+#### Blob Rehydration (Archive Tier)
 
-Configure rules to automatically:
+**Rehydration** is the process of moving a blob from the Archive tier to an online tier (Hot or Cool) so it can be accessed.
 
-- Move blobs to cooler tiers
-- Delete blobs after specified time period
+##### Key Concepts
 
-```csharp
-// C# example: Create a blob lifecycle management policy
-BlobServiceClient blobServiceClient = new BlobServiceClient(connectionString);
-BlobServiceProperties properties = await blobServiceClient.GetPropertiesAsync();
+- **Archive tier blobs are offline**: Cannot be read, copied, or modified until rehydrated
+- **Rehydration time**: Can take up to 15 hours for standard priority
+- **Rehydration priority**: Standard (up to 15 hours) or High (under 1 hour for blobs <10GB)
+- **Cost implications**: Rehydration incurs additional charges
 
-// Create a policy with rules
-ManagementPolicy policy = new ManagementPolicy
-{
-    Rules =
-    {
-        new ManagementPolicyRule
-        {
-            Name = "rule1",
-            Definition = new ManagementPolicyDefinition
-            {
-                Actions = new ManagementPolicyAction
-                {
-                    BaseBlob = new ManagementPolicyBaseBlob
-                    {
-                        TierToCool = new DateAfterModification { DaysAfterModificationGreaterThan = 30 },
-                        TierToArchive = new DateAfterModification { DaysAfterModificationGreaterThan = 90 },
-                        Delete = new DateAfterModification { DaysAfterModificationGreaterThan = 365 }
-                    }
-                },
-                Filters = new ManagementPolicyFilter
-                {
-                    PrefixMatch = { "container1/log" }
-                }
-            }
-        }
-    }
-};
+##### Rehydration Methods
 
-await blobServiceClient.SetManagementPolicyAsync(policy);
+**Method 1: Change the access tier**
+
+```http
+PUT https://myaccount.blob.core.windows.net/mycontainer/myblob.txt?comp=tier
+Authorization: SharedKey myaccount:signature
+x-ms-version: 2021-08-06
+x-ms-access-tier: Hot
+x-ms-rehydrate-priority: High
 ```
 
-> ⚠️ **Gotcha**: Remember that changing tiers incurs charges, and retrieving from Archive tier has high latency (hours).
+**Method 2: Copy to a new blob in an online tier**
+
+```http
+PUT https://myaccount.blob.core.windows.net/mycontainer/newblob.txt
+Authorization: SharedKey myaccount:signature
+x-ms-version: 2021-08-06
+x-ms-copy-source: https://myaccount.blob.core.windows.net/mycontainer/archivedblob.txt
+x-ms-access-tier: Hot
+x-ms-rehydrate-priority: Standard
+```
+
+##### Azure CLI Examples
+
+```bash
+# Rehydrate by changing tier (modifies original blob)
+az storage blob set-tier \
+    --account-name mystorageaccount \
+    --container-name mycontainer \
+    --name archivedblob.txt \
+    --tier Hot \
+    --rehydrate-priority High
+
+# Rehydrate by copying to new blob (preserves original)
+az storage blob copy start \
+    --account-name mystorageaccount \
+    --destination-container mycontainer \
+    --destination-blob rehydratedblob.txt \
+    --source-container mycontainer \
+    --source-blob archivedblob.txt \
+    --tier Cool \
+    --rehydrate-priority Standard
+```
+
+##### C# SDK Examples
+
+```csharp
+// Method 1: Change access tier (rehydrate in place)
+BlobClient blobClient = containerClient.GetBlobClient("archivedblob.txt");
+
+await blobClient.SetAccessTierAsync(
+    AccessTier.Hot, 
+    rehydratePriority: RehydratePriority.High);
+
+// Method 2: Copy to new blob with online tier
+BlobClient sourceBlobClient = containerClient.GetBlobClient("archivedblob.txt");
+BlobClient destBlobClient = containerClient.GetBlobClient("rehydratedblob.txt");
+
+await destBlobClient.StartCopyFromUriAsync(
+    sourceBlobClient.Uri,
+    accessTier: AccessTier.Cool,
+    rehydratePriority: RehydratePriority.Standard);
+```
+
+##### Monitoring Rehydration Status
+
+```csharp
+// Check rehydration status
+BlobProperties properties = await blobClient.GetPropertiesAsync();
+
+Console.WriteLine($"Access Tier: {properties.AccessTier}");
+Console.WriteLine($"Archive Status: {properties.ArchiveStatus}");
+Console.WriteLine($"Rehydrate Priority: {properties.RehydratePriority}");
+
+// Archive status values:
+// - null: Blob is in online tier
+// - "rehydrate-pending-to-hot": Rehydration to Hot tier in progress
+// - "rehydrate-pending-to-cool": Rehydration to Cool tier in progress
+```
+
+##### REST API Response for Archived Blob
+
+```http
+GET https://myaccount.blob.core.windows.net/mycontainer/archivedblob.txt
+Authorization: SharedKey myaccount:signature
+
+Response:
+HTTP/1.1 409 Conflict
+x-ms-error-code: BlobArchived
+x-ms-access-tier: Archive
+x-ms-archive-status: rehydrate-pending-to-hot
+x-ms-rehydrate-priority: High
+```
+
+> ⚠️ **Critical Gotchas for Exam:**
+> 
+> - **Cannot read archived blobs**: Any attempt to read/download will return HTTP 409 (Conflict)
+> - **Rehydration takes time**: Up to 15 hours for standard priority
+> - **Early deletion charges**: Moving from Archive before 180 days incurs fees
+> - **Rehydration costs**: Additional charges apply for retrieving archived data
+> - **High priority limitations**: Only for blobs smaller than 10GB
+
+> 💡 **Exam Tips:**
+> 
+> - **Use Copy method** when you want to preserve the original archived blob
+> - **Use SetTier method** when you want to permanently move the blob online
+> - **Monitor archive status** to determine when rehydration is complete
+> - **High priority rehydration** costs significantly more but completes in under 1 hour
+
+### Lifecycle Management
+
+Blob lifecycle management provides a rich, rule-based policy to transition your data to the best access tier and to expire data at the end of its lifecycle.
+
+#### Key Concepts
+
+- **Lifecycle policies**: Rules that automatically manage blob data based on age or other criteria
+- **Actions**: What happens to blobs (tier changes, deletion)
+- **Filters**: Which blobs the rule applies to (by prefix, blob type, etc.)
+- **Conditions**: When the action should occur (days after creation, modification, etc.)
+
+#### Supported Actions
+
+|Action|Description|Applies To|
+|---|---|---|
+|**tierToCool**|Move to Cool tier|Block blobs, Append blobs|
+|**tierToArchive**|Move to Archive tier|Block blobs, Append blobs|
+|**delete**|Delete the blob|All blob types|
+|**enableAutoTierToHotFromCool**|Auto-move back to Hot if accessed|Block blobs|
+
+#### Condition Types
+
+- **daysAfterModificationGreaterThan**: Days since last modification
+- **daysAfterCreationGreaterThan**: Days since blob creation
+- **daysAfterLastAccessTimeGreaterThan**: Days since last access (requires access tracking)
+
+```json
+{
+  "rules": [
+    {
+      "name": "LogFilePolicy",
+      "enabled": true,
+      "type": "Lifecycle",
+      "definition": {
+        "filters": {
+          "blobTypes": ["blockBlob"],
+          "prefixMatch": ["logs/", "temp/"]
+        },
+        "actions": {
+          "baseBlob": {
+            "tierToCool": {
+              "daysAfterModificationGreaterThan": 7
+            },
+            "tierToArchive": {
+              "daysAfterModificationGreaterThan": 30
+            },
+            "delete": {
+              "daysAfterModificationGreaterThan": 365
+            }
+          },
+          "snapshot": {
+            "delete": {
+              "daysAfterCreationGreaterThan": 90
+            }
+          },
+          "version": {
+            "delete": {
+              "daysAfterCreationGreaterThan": 90
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "MediaFilePolicy",
+      "enabled": true,
+      "type": "Lifecycle",
+      "definition": {
+        "filters": {
+          "blobTypes": ["blockBlob"],
+          "prefixMatch": ["media/videos/", "media/images/"]
+        },
+        "actions": {
+          "baseBlob": {
+            "tierToCool": {
+              "daysAfterLastAccessTimeGreaterThan": 30
+            },
+            "tierToArchive": {
+              "daysAfterLastAccessTimeGreaterThan": 180
+            },
+            "enableAutoTierToHotFromCool": true
+          }
+        }
+      }
+    }
+  ]
+}
+```
+
+#### Advanced Filtering with Blob Index Tags
+
+```json
+{
+  "rules": [
+    {
+      "name": "TagBasedPolicy",
+      "enabled": true,
+      "type": "Lifecycle",
+      "definition": {
+        "filters": {
+          "blobTypes": ["blockBlob"],
+          "blobIndexMatch": [
+            {
+              "name": "department",
+              "op": "==",
+              "value": "finance"
+            },
+            {
+              "name": "classification",
+              "op": "==",
+              "value": "archived"
+            }
+          ]
+        },
+        "actions": {
+          "baseBlob": {
+            "delete": {
+              "daysAfterModificationGreaterThan": 2555
+            }
+          }
+        }
+      }
+    }
+  ]
+}
+```
+
+> ⚠️ **Gotcha**: Lifecycle policies run once per day and may take up to 24 hours to take effect. Early deletion fees apply when moving blobs to cooler tiers before minimum storage duration.
+
+> 💡 **Exam Tip**: Know the minimum storage durations: Cool tier (30 days), Archive tier (180 days). Moving blobs before these periods incurs early deletion charges.
+
+#### CLI Commands for Lifecycle Management
+
+```bash
+# Set a lifecycle policy from JSON file
+az storage account management-policy create \
+    --account-name mystorageaccount \
+    --policy @policy.json \
+    --resource-group myresourcegroup
+
+# Get current lifecycle policy
+az storage account management-policy show \
+    --account-name mystorageaccount \
+    --resource-group myresourcegroup
+```
+
+#### Best Practices for Lifecycle Policies
+
+- **Test policies carefully**: Start with a small subset of data
+- **Use appropriate filters**: Be specific with prefixes to avoid unintended actions
+- **Consider access patterns**: Use last access time conditions for frequently accessed data
+- **Monitor costs**: Understand the cost implications of tier transitions
+- **Plan for retrieval**: Archive tier has hours of latency for data retrieval
 
 ### Blob Client Libraries
+
+| Class                 | Description                                                                                                                                                                                                                                                          |
+| --------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `BlobClient`          | The [`BlobClient`](https://learn.microsoft.com/en-us/dotnet/api/azure.storage.blobs.blobclient) allows you to manipulate Azure Storage blobs.                                                                                                                        |
+| `BlobClientOptions`   | Provides the client configuration options for connecting to Azure Blob Storage.                                                                                                                                                                                      |
+| `BlobContainerClient` | The [BlobContainerClient](https://learn.microsoft.com/en-us/dotnet/api/azure.storage.blobs.blobcontainerclient) allows you to manipulate Azure Storage containers and their blobs.                                                                                   |
+| `BlobServiceClient`   | The [BlobServiceClient](https://learn.microsoft.com/en-us/dotnet/api/azure.storage.blobs.blobserviceclient) allows you to manipulate Azure Storage service resources and blob containers. The storage account provides the top-level namespace for the Blob service. |
+| `BlobUriBuilder`      | The [BlobUriBuilder](https://learn.microsoft.com/en-us/dotnet/api/azure.storage.blobs.bloburibuilder) class provides a convenient way to modify the contents of a Uri instance to point to different Azure Storage resources like an account, container, or blob.    |
 
 ```csharp
 // Create a BlobServiceClient
@@ -164,6 +404,53 @@ foreach (var metadataItem in properties.Metadata)
 
 > ⚠️ **Gotcha**: Metadata names are case-insensitive when set and retrieved, but preserved as they were when stored. Also, metadata cannot contain special characters like spaces - use only alphanumeric characters.
 
+#### SetHttpHeaders vs SetMetadata
+
+This is a critical distinction that frequently appears on the AZ-204 exam:
+
+**SetHttpHeaders** - Sets standard HTTP headers that affect blob behavior:
+
+```csharp
+// Set HTTP headers - these control blob behavior and client interaction
+BlobHttpHeaders headers = new BlobHttpHeaders
+{
+    ContentType = "application/pdf",           // MIME type for browsers/clients
+    ContentLanguage = "en-US",                 // Content language
+    ContentEncoding = "gzip",                  // Compression method
+    ContentDisposition = "attachment; filename=report.pdf", // Download behavior
+    CacheControl = "max-age=3600",             // Browser caching instructions
+    ContentHash = computedHash                 // MD5 hash for integrity
+};
+
+await blobClient.SetHttpHeadersAsync(headers);
+```
+
+**SetMetadata** - Sets custom key-value pairs for application use:
+
+```csharp
+// Set metadata - custom information for your application logic
+IDictionary<string, string> metadata = new Dictionary<string, string>
+{
+    { "department", "Finance" },               // Custom business logic
+    { "confidentiality", "Internal" },        // Custom classification
+    { "retention-period", "7-years" }         // Custom retention info
+};
+
+await blobClient.SetMetadataAsync(metadata);
+```
+
+**Key Differences:**
+
+|Aspect|SetHttpHeaders|SetMetadata|
+|---|---|---|
+|**Purpose**|Controls how browsers/clients handle the blob|Stores custom application data|
+|**Visibility**|Sent as HTTP headers to clients|Only accessible via Azure Storage APIs|
+|**Impact**|Affects download behavior, caching, MIME type|No impact on client behavior|
+|**Standard Headers**|Uses predefined HTTP headers|Uses custom key-value pairs|
+|**Browser Interaction**|Directly affects how browsers process the file|Invisible to browsers|
+
+> 💡 **Exam Tip**: Use SetHttpHeaders when you want to control how the blob behaves when accessed via HTTP (download as attachment, set MIME type, etc.). Use SetMetadata for storing custom information about the blob that your application needs to track.
+
 #### Using Metadata in Operations
 
 - **Search and filter**: Metadata can be used in blob listing operations
@@ -187,6 +474,27 @@ await foreach (BlobItem blobItem in containerClient.GetBlobsAsync(BlobTraits.Met
 
 ---
 
+## Standard HTTP properties for containers and blobs
+
+Containers and blobs also support certain standard HTTP properties. Properties and metadata are both represented as standard HTTP headers; the difference between them is in the naming of the headers. Metadata headers are named with the header prefix `x-ms-meta-` and a custom name. Property headers use standard HTTP header names, as specified in the Header Field Definitions section 14 of the HTTP/1.1 protocol specification.
+
+The standard HTTP headers supported on containers include:
+
+- `ETag`
+- `Last-Modified`
+
+The standard HTTP headers supported on blobs include:
+
+- `ETag`
+- `Last-Modified`
+- `Content-Length`
+- `Content-Type`
+- `Content-MD5`
+- `Content-Encoding`
+- `Content-Language`
+- `Cache-Control`
+- `Origin`
+- `Range`
 ## 📊 Table Storage
 
 Azure Table Storage is a NoSQL datastore for semi-structured data.
@@ -499,6 +807,36 @@ BlobServiceClient blobServiceClient = new BlobServiceClient(
 - **Account SAS**: Access to one or more services
 - **User delegation SAS**: Secured with Azure AD credentials
 
+```json
+{
+  "signedVersion": "2021-08-06",
+  "signedResource": "c",
+  "signedPermissions": "rl",
+  "signedStart": "2025-06-01T00:00:00Z",
+  "signedExpiry": "2025-06-02T00:00:00Z",
+  "signedIP": "192.168.1.0/24",
+  "signedProtocol": "https"
+}
+```
+
+**SAS URL Structure:**
+
+```
+https://myaccount.blob.core.windows.net/mycontainer?sv=2021-08-06&ss=b&srt=sco&sp=rwdlacupx&se=2025-06-02T00:00:00Z&st=2025-06-01T00:00:00Z&spr=https&sig=<signature>
+```
+
+**SAS Parameters:**
+
+- **sv**: Signed version
+- **ss**: Signed services (b=blob, q=queue, t=table, f=file)
+- **srt**: Signed resource types (s=service, c=container, o=object)
+- **sp**: Signed permissions (r=read, w=write, d=delete, l=list, a=add, c=create, u=update, p=process, x=execute)
+- **se**: Signed expiry time
+- **st**: Signed start time
+- **sip**: Signed IP addresses
+- **spr**: Signed protocol (https or http,https)
+- **sig**: Signature
+
 ```csharp
 // Generate a service SAS for a blob
 BlobSasBuilder sasBuilder = new BlobSasBuilder
@@ -544,7 +882,16 @@ BlobServiceClient blobServiceClient = new BlobServiceClient(
 
 ### AzCopy
 
-Command-line utility for copying data to/from Azure Storage.
+AzCopy is a **command-line utility** for copying data to/from Azure Storage. It's not a library that you embed in applications, but a standalone executable.
+
+#### How AzCopy Works
+
+- **Standalone executable**: Downloaded and run from command line or PowerShell
+- **Cross-platform**: Available for Windows, Linux, and macOS
+- **High performance**: Optimized for large-scale data transfers
+- **Resumable transfers**: Can resume interrupted transfers
+
+#### Basic AzCopy Commands
 
 ```bash
 # Copy a local file to blob storage
@@ -552,17 +899,174 @@ azcopy copy "C:\local\path\file.txt" "https://myaccount.blob.core.windows.net/my
 
 # Copy a blob to another storage account
 azcopy copy "https://sourceaccount.blob.core.windows.net/mycontainer/file.txt?<SAS>" "https://destaccount.blob.core.windows.net/mycontainer/file.txt?<SAS>"
+
+# Sync a directory to blob storage (one-way sync)
+azcopy sync "C:\local\directory" "https://myaccount.blob.core.windows.net/mycontainer?<SAS>" --recursive
+
+# Copy entire container
+azcopy copy "https://sourceaccount.blob.core.windows.net/sourcecontainer?<SAS>" "https://destaccount.blob.core.windows.net/destcontainer?<SAS>" --recursive
+
+# Copy with specific options
+azcopy copy "C:\local\path\*" "https://myaccount.blob.core.windows.net/mycontainer?<SAS>" \
+    --recursive \
+    --include-pattern="*.pdf;*.docx" \
+    --exclude-pattern="temp*" \
+    --overwrite=true \
+    --block-size-mb=100
 ```
 
-### Azure Storage Data Movement Library
+#### Authentication Methods for AzCopy
+
+```bash
+# 1. Using SAS tokens (most common)
+azcopy copy "source" "destination?<SAS>"
+
+# 2. Using Azure AD authentication
+azcopy login
+azcopy copy "source" "destination"
+
+# 3. Using Azure AD with service principal
+azcopy login --service-principal --application-id <app-id> --tenant-id <tenant-id>
+azcopy copy "source" "destination"
+```
+
+#### AzCopy Job Management
+
+```bash
+# List jobs
+azcopy jobs list
+
+# Show job details
+azcopy jobs show <job-id>
+
+# Resume a job
+azcopy jobs resume <job-id>
+
+# Clean up job files
+azcopy jobs clean
+```
+
+#### Using AzCopy in Scripts and Automation
+
+```bash
+# PowerShell script example
+$source = "C:\data\*"
+$destination = "https://mystorageaccount.blob.core.windows.net/backup?$sasToken"
+
+# Run AzCopy with error handling
+$result = & azcopy copy $source $destination --recursive --overwrite=true
+if ($LASTEXITCODE -ne 0) {
+    Write-Error "AzCopy failed with exit code $LASTEXITCODE"
+    exit 1
+}
+```
+
+```bash
+# Bash script example
+#!/bin/bash
+SOURCE="/home/data/*"
+DEST="https://mystorageaccount.blob.core.windows.net/backup?$SAS_TOKEN"
+
+# Run AzCopy with logging
+azcopy copy "$SOURCE" "$DEST" --recursive --log-level=INFO --output-type=text
+
+if [ $? -eq 0 ]; then
+    echo "Transfer completed successfully"
+else
+    echo "Transfer failed"
+    exit 1
+fi
+```
+
+#### Calling AzCopy from Applications
+
+While AzCopy itself is a CLI tool, you can call it from applications:
 
 ```csharp
-// Copy a blob from one container to another
+// C# example: Calling AzCopy from an application
+using System.Diagnostics;
+
+public async Task<bool> TransferWithAzCopy(string source, string destination)
+{
+    var processStartInfo = new ProcessStartInfo
+    {
+        FileName = "azcopy",
+        Arguments = $"copy \"{source}\" \"{destination}\" --recursive",
+        RedirectStandardOutput = true,
+        RedirectStandardError = true,
+        UseShellExecute = false,
+        CreateNoWindow = true
+    };
+
+    using var process = Process.Start(processStartInfo);
+    if (process == null) return false;
+
+    await process.WaitForExitAsync();
+    return process.ExitCode == 0;
+}
+```
+
+> ⚠️ **Gotcha**: AzCopy is not a .NET library - it's a separate executable that must be installed on the machine where it runs.
+
+> 💡 **Exam Tip**: For the AZ-204 exam, know that AzCopy is the recommended tool for bulk data transfers and migration scenarios, but for programmatic access within applications, use the Azure Storage SDKs instead.
+
+### Azure CLI Commands for Storage Management
+
+```bash
+# Create storage account
+az storage account create \
+    --name mystorageaccount \
+    --resource-group myresourcegroup \
+    --location eastus \
+    --sku Standard_LRS \
+    --kind StorageV2
+
+# Create container
+az storage container create \
+    --name mycontainer \
+    --account-name mystorageaccount \
+    --public-access blob
+
+# Upload blob with metadata
+az storage blob upload \
+    --account-name mystorageaccount \
+    --container-name mycontainer \
+    --name myblob.txt \
+    --file ./local-file.txt \
+    --metadata department=HR project=Q1Report
+
+# Generate SAS token
+az storage blob generate-sas \
+    --account-name mystorageaccount \
+    --container-name mycontainer \
+    --name myblob.txt \
+    --permissions r \
+    --expiry 2025-06-03T00:00:00Z \
+    --https-only
+```
+
+### Azure Storage SDK for Programmatic Access
+
+For applications, use the Azure Storage SDKs instead of AzCopy:
+
+```csharp
+// Copy a blob from one container to another using SDK
 BlobClient sourceBlob = sourceBlobContainerClient.GetBlobClient("sourcefile.txt");
 BlobClient destBlob = destBlobContainerClient.GetBlobClient("destfile.txt");
 
 // Start the copy operation
 await destBlob.StartCopyFromUriAsync(sourceBlob.Uri);
+
+// For large file uploads, use block upload
+using var fileStream = File.OpenRead("largefile.dat");
+await destBlob.UploadAsync(fileStream, new BlobUploadOptions
+{
+    TransferOptions = new StorageTransferOptions
+    {
+        MaximumTransferSize = 100 * 1024 * 1024, // 100MB blocks
+        InitialTransferSize = 100 * 1024 * 1024
+    }
+});
 ```
 
 > ⚠️ **Gotcha**: Large file uploads should use the recommended block size of 100MB for optimal performance.
@@ -602,7 +1106,70 @@ await destBlob.StartCopyFromUriAsync(sourceBlob.Uri);
 
 ## 🔄 Key SDK Versions for AZ-204
 
-For the AZ-204 exam, you should be familiar with the following NuGet package versions:
+For the AZ-204 exam, you should be familiar with REST API calls and JSON configurations:
+
+### REST API Examples
+
+#### Upload Blob with Metadata
+
+```http
+PUT https://myaccount.blob.core.windows.net/mycontainer/myblob.txt
+Authorization: SharedKey myaccount:signature
+x-ms-version: 2021-08-06
+x-ms-blob-type: BlockBlob
+Content-Type: text/plain
+x-ms-meta-department: HR
+x-ms-meta-project: AnnualReport
+Content-Length: 1024
+
+[blob content]
+```
+
+#### Set Blob Metadata
+
+```http
+PUT https://myaccount.blob.core.windows.net/mycontainer/myblob.txt?comp=metadata
+Authorization: SharedKey myaccount:signature
+x-ms-version: 2021-08-06
+x-ms-meta-department: Finance
+x-ms-meta-classification: Confidential
+```
+
+#### Set Blob Properties (HTTP Headers)
+
+```http
+PUT https://myaccount.blob.core.windows.net/mycontainer/myblob.txt?comp=properties
+Authorization: SharedKey myaccount:signature
+x-ms-version: 2021-08-06
+x-ms-blob-content-type: application/pdf
+x-ms-blob-content-disposition: attachment; filename=report.pdf
+x-ms-blob-cache-control: max-age=3600
+```
+
+### Common JSON Configurations
+
+#### Storage Account ARM Template
+
+```json
+{
+  "type": "Microsoft.Storage/storageAccounts",
+  "apiVersion": "2023-01-01",
+  "name": "[parameters('storageAccountName')]",
+  "location": "[parameters('location')]",
+  "sku": {
+    "name": "Standard_LRS"
+  },
+  "kind": "StorageV2",
+  "properties": {
+    "accessTier": "Hot",
+    "supportsHttpsTrafficOnly": true,
+    "minimumTlsVersion": "TLS1_2",
+    "allowBlobPublicAccess": false
+  }
+}
+```
+
+### NuGet Package Versions
 
 |Package|Recommended Version|
 |---|---|
